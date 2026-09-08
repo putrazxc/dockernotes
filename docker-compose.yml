@@ -7,3 +7,8 @@ services:
     volumes:
       - ./backend/database.sqlite:/app/backend/database.sqlite
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 200M
