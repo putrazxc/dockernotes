@@ -505,8 +505,9 @@ onMounted(() => {
                 </div>
                 <h3 class="grid-card-title truncate-2">{{ note.title }}</h3>
                 <div class="grid-card-footer">
-                  <button @click.stop="copyToClipboard(note.content)" class="btn-icon">
-                    <Copy :size="14" />
+                  <button @click.stop="copyToClipboard(note.content)" class="btn btn-primary">
+                    <Copy :size="16" />
+                    Copy Command
                   </button>
                 </div>
               </div>
