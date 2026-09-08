@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { Copy, Plus, Search, Terminal, FileText, LayoutDashboard, Check, Edit2, Trash2 } from 'lucide-vue-next'
+import { Copy, Plus, Terminal, FileText, LayoutDashboard, Check, Edit2, Trash2, AlertTriangle } from 'lucide-vue-next'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
@@ -19,6 +19,10 @@ const editNoteId = ref(null)
 const toastMessage = ref('')
 const showToast = ref(false)
 let toastTimeout = null
+
+// Delete Modal state
+const showDeleteModal = ref(false)
+const noteToDelete = ref(null)
 
 const fetchNotes = async () => {
   try {
@@ -90,8 +94,19 @@ const saveNote = async () => {
   }
 }
 
-const deleteNote = async (id) => {
-  if (!confirm('Are you sure you want to delete this command? This action cannot be undone.')) return
+const confirmDeleteAction = (id) => {
+  noteToDelete.value = id
+  showDeleteModal.value = true
+}
+
+const cancelDelete = () => {
+  showDeleteModal.value = false
+  noteToDelete.value = null
+}
+
+const executeDelete = async () => {
+  const id = noteToDelete.value
+  if (!id) return
   
   try {
     const res = await fetch(`/api/notes/${id}`, { method: 'DELETE' })
@@ -104,6 +119,9 @@ const deleteNote = async (id) => {
     }
   } catch (err) {
     console.error("Error deleting note", err)
+  } finally {
+    showDeleteModal.value = false
+    noteToDelete.value = null
   }
 }
 
@@ -197,14 +215,6 @@ onMounted(() => {
 
     <!-- Main Content -->
     <main class="main-content">
-      <!-- Topbar -->
-      <header class="topbar">
-        <div class="search-container">
-          <Search :size="16" class="search-icon" />
-          <input type="text" placeholder="Search commands..." class="search-input" />
-        </div>
-      </header>
-
       <!-- Content Area -->
       <div class="content-scroll">
         <div class="content-inner">
@@ -255,7 +265,7 @@ onMounted(() => {
               
               <div class="card-footer">
                 <div class="footer-left">
-                  <button @click="deleteNote(selectedNote.id)" class="btn btn-danger-outline">
+                  <button @click="confirmDeleteAction(selectedNote.id)" class="btn btn-danger-outline">
                     <Trash2 :size="16" />
                     Delete
                   </button>
@@ -286,6 +296,27 @@ onMounted(() => {
         </div>
       </div>
     </main>
+
+    <!-- Delete Confirmation Modal -->
+    <transition name="modal-fade">
+      <div v-if="showDeleteModal" class="modal-overlay" @click.self="cancelDelete">
+        <div class="modal-content">
+          <div class="modal-header">
+            <div class="modal-icon-bg">
+              <AlertTriangle :size="24" class="modal-icon" />
+            </div>
+            <div class="modal-title-area">
+              <h2>Delete Command</h2>
+              <p class="text-muted">Are you sure you want to delete this command? This action cannot be undone.</p>
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button @click="cancelDelete" class="btn btn-outline">Cancel</button>
+            <button @click="executeDelete" class="btn btn-danger">Delete</button>
+          </div>
+        </div>
+      </div>
+    </transition>
     
     <!-- Minimalist Toast Notification -->
     <transition name="toast-fade">
@@ -326,6 +357,9 @@ onMounted(() => {
   --ring: #d4d4d8;
   
   --radius: 0.5rem;
+  
+  --destructive: #7f1d1d;
+  --destructive-foreground: #fafafa;
 }
 
 * {
@@ -455,48 +489,6 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 0; /* Important for truncating flex children */
-}
-
-/* Topbar */
-.topbar {
-  height: 60px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  padding: 0 2rem;
-}
-
-.search-container {
-  display: flex;
-  align-items: center;
-  background-color: var(--background);
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
-  padding: 0.25rem 0.75rem;
-  width: 300px;
-  transition: border-color 0.15s;
-}
-
-.search-container:focus-within {
-  border-color: var(--ring);
-}
-
-.search-icon {
-  color: var(--muted-foreground);
-  margin-right: 0.5rem;
-}
-
-.search-input {
-  background: transparent;
-  border: none;
-  color: var(--foreground);
-  font-size: 0.875rem;
-  width: 100%;
-  padding: 0.25rem 0;
-}
-
-.search-input:focus {
-  outline: none;
 }
 
 /* Content Area */
@@ -652,6 +644,16 @@ body {
   background-color: rgba(239, 68, 68, 0.1);
 }
 
+.btn-danger {
+  background-color: var(--destructive);
+  color: var(--destructive-foreground);
+  border: none;
+}
+
+.btn-danger:hover {
+  background-color: #991b1b;
+}
+
 /* Markdown Rendering */
 .rendered-markdown {
   font-size: 0.95rem;
@@ -764,5 +766,88 @@ body {
 .toast-fade-leave-to {
   opacity: 0;
   transform: translateY(20px);
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal-content {
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  width: 100%;
+  max-width: 450px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+  padding: 1.5rem;
+}
+
+.modal-header {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.modal-icon-bg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(239, 68, 68, 0.15);
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.modal-icon {
+  color: #ef4444;
+}
+
+.modal-title-area h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem 0;
+}
+
+.modal-title-area p {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.modal-fade-enter-active,
+.modal-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.modal-fade-enter-from,
+.modal-fade-leave-to {
+  opacity: 0;
+}
+
+.modal-fade-enter-active .modal-content {
+  animation: modal-pop 0.2s ease-out;
+}
+
+@keyframes modal-pop {
+  0% { transform: scale(0.95); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
 }
 </style>
