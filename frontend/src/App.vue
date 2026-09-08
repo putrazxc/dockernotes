@@ -265,7 +265,7 @@ onMounted(() => {
               
               <div class="card-footer">
                 <div class="footer-left">
-                  <button @click="confirmDeleteAction(selectedNote.id)" class="btn btn-danger-outline">
+                  <button @click="confirmDeleteAction(selectedNote.id)" class="btn btn-danger">
                     <Trash2 :size="16" />
                     Delete
                   </button>
