@@ -51,10 +51,8 @@ const fetchNotes = async () => {
     if (json.data) {
       notes.value = json.data
       
-      // Expand all categories by default initially
-      const categories = new Set()
-      notes.value.forEach(note => categories.add(note.category || 'General'))
-      expandedCategories.value = categories
+      // Categories are collapsed by default, so we just clear the set
+      expandedCategories.value = new Set()
     }
   } catch (err) {
     console.error("Error fetching notes", err)
