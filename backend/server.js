@@ -22,8 +22,14 @@ const db = new sqlite3.Database(dbPath, (err) => {
         title TEXT NOT NULL,
         content TEXT NOT NULL,
         category TEXT DEFAULT 'General',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        is_shortcut BOOLEAN DEFAULT 0
     )`);
+    
+    // Migration: Add is_shortcut column if it doesn't exist
+    db.run(`ALTER TABLE notes ADD COLUMN is_shortcut BOOLEAN DEFAULT 0`, (err) => {
+      // Ignore error if column already exists
+    });
   }
 });
 
@@ -46,13 +52,16 @@ app.get('/api/notes', (req, res) => {
 
 // Create a new note
 app.post('/api/notes', (req, res) => {
-  const { title, content, category } = req.body;
+  const { title, content, category, is_shortcut } = req.body;
+  
   if (!title || !content) {
     res.status(400).json({ error: 'Title and content are required' });
     return;
   }
-  const sql = 'INSERT INTO notes (title, content, category) VALUES (?, ?, ?)';
-  const params = [title, content, category || 'General'];
+  
+  const sql = 'INSERT INTO notes (title, content, category, is_shortcut) VALUES (?, ?, ?, ?)';
+  const params = [title, content, category || 'General', is_shortcut ? 1 : 0];
+  
   db.run(sql, params, function(err) {
     if (err) {
       res.status(400).json({ error: err.message });
@@ -60,14 +69,14 @@ app.post('/api/notes', (req, res) => {
     }
     res.json({
       message: 'success',
-      data: { id: this.lastID, title, content, category }
+      data: { id: this.lastID, title, content, category, is_shortcut: is_shortcut ? 1 : 0 }
     });
   });
 });
 
 // Update an existing note
 app.put('/api/notes/:id', (req, res) => {
-  const { title, content, category } = req.body;
+  const { title, content, category, is_shortcut } = req.body;
   const { id } = req.params;
   
   if (!title || !content) {
@@ -75,8 +84,8 @@ app.put('/api/notes/:id', (req, res) => {
     return;
   }
   
-  const sql = 'UPDATE notes SET title = ?, content = ?, category = ? WHERE id = ?';
-  const params = [title, content, category || 'General', id];
+  const sql = 'UPDATE notes SET title = ?, content = ?, category = ?, is_shortcut = ? WHERE id = ?';
+  const params = [title, content, category || 'General', is_shortcut ? 1 : 0, id];
   
   db.run(sql, params, function(err) {
     if (err) {
@@ -85,7 +94,7 @@ app.put('/api/notes/:id', (req, res) => {
     }
     res.json({
       message: 'success',
-      data: { id: Number(id), title, content, category }
+      data: { id: Number(id), title, content, category, is_shortcut: is_shortcut ? 1 : 0 }
     });
   });
 });

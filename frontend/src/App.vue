@@ -1,12 +1,13 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { Copy, Plus, Terminal, FileText, LayoutDashboard, Check, Edit2, Trash2, AlertTriangle, Cloud, MapPin, Wind, Sun, CloudRain } from 'lucide-vue-next'
+import { Copy, Plus, Terminal, FileText, LayoutDashboard, Check, Edit2, Trash2, AlertTriangle, Cloud, MapPin, Wind, Sun, CloudRain, Search, ChevronRight, ChevronDown, Pin, PinOff } from 'lucide-vue-next'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
 const notes = ref([])
 const loading = ref(true)
 const selectedNote = ref(null)
+const searchQuery = ref('')
 
 // Form State
 const newTitle = ref('')
@@ -30,15 +31,30 @@ const aqiData = ref(null)
 const locationName = ref('Detecting location...')
 const isWeatherLoading = ref(true)
 
+// Collapsible Categories State
+const expandedCategories = ref(new Set())
+
+const toggleCategory = (category) => {
+  const newSet = new Set(expandedCategories.value)
+  if (newSet.has(category)) {
+    newSet.delete(category)
+  } else {
+    newSet.add(category)
+  }
+  expandedCategories.value = newSet
+}
+
 const fetchNotes = async () => {
   try {
     const res = await fetch('/api/notes')
     const json = await res.json()
     if (json.data) {
       notes.value = json.data
-      if (notes.value.length > 0) {
-        selectedNote.value = notes.value[0]
-      }
+      
+      // Expand all categories by default initially
+      const categories = new Set()
+      notes.value.forEach(note => categories.add(note.category || 'General'))
+      expandedCategories.value = categories
     }
   } catch (err) {
     console.error("Error fetching notes", err)
@@ -74,21 +90,20 @@ const fetchWeatherData = async (lat, lon) => {
 
 const getAQIStatus = (aqi) => {
   if (!aqi) return { text: '-', color: '#a1a1aa' }
-  if (aqi <= 50) return { text: 'Good', color: '#10b981' } // Green
-  if (aqi <= 100) return { text: 'Moderate', color: '#f59e0b' } // Yellow
-  if (aqi <= 150) return { text: 'Unhealthy for Sensitive', color: '#f97316' } // Orange
-  if (aqi <= 200) return { text: 'Unhealthy', color: '#ef4444' } // Red
-  if (aqi <= 300) return { text: 'Very Unhealthy', color: '#8b5cf6' } // Purple
-  return { text: 'Hazardous', color: '#7f1d1d' } // Dark Red
+  if (aqi <= 50) return { text: 'Good', color: '#10b981' }
+  if (aqi <= 100) return { text: 'Moderate', color: '#f59e0b' }
+  if (aqi <= 150) return { text: 'Unhealthy for Sensitive', color: '#f97316' }
+  if (aqi <= 200) return { text: 'Unhealthy', color: '#ef4444' }
+  if (aqi <= 300) return { text: 'Very Unhealthy', color: '#8b5cf6' }
+  return { text: 'Hazardous', color: '#7f1d1d' }
 }
 
 const getWeatherIcon = (code) => {
-  // WMO Weather interpretation codes
-  if (code === 0) return Sun // Clear sky
-  if (code === 1 || code === 2 || code === 3) return Cloud // Mainly clear, partly cloudy, and overcast
-  if (code >= 50 && code <= 69) return CloudRain // Drizzle / Rain
-  if (code >= 80 && code <= 82) return CloudRain // Rain showers
-  return Wind // Default/Others
+  if (code === 0) return Sun
+  if (code === 1 || code === 2 || code === 3) return Cloud
+  if (code >= 50 && code <= 69) return CloudRain
+  if (code >= 80 && code <= 82) return CloudRain
+  return Wind
 }
 
 const openAddForm = () => {
@@ -96,6 +111,7 @@ const openAddForm = () => {
   newContent.value = ''
   newCategory.value = 'General'
   editNoteId.value = null
+  selectedNote.value = null
   showAddForm.value = true
 }
 
@@ -108,12 +124,30 @@ const openEditForm = () => {
   showAddForm.value = true
 }
 
+const showDashboard = () => {
+  selectedNote.value = null
+  showAddForm.value = false
+  searchQuery.value = ''
+}
+
+const selectNote = (note) => {
+  selectedNote.value = note
+  showAddForm.value = false
+}
+
 const saveNote = async () => {
   if (!newTitle.value || !newContent.value) return
   
   const isEditing = editNoteId.value !== null;
   const url = isEditing ? `/api/notes/${editNoteId.value}` : '/api/notes';
   const method = isEditing ? 'PUT' : 'POST';
+  
+  // Maintain the current is_shortcut state if editing
+  let is_shortcut = false;
+  if (isEditing) {
+    const existing = notes.value.find(n => n.id === editNoteId.value);
+    if (existing) is_shortcut = existing.is_shortcut;
+  }
   
   try {
     const res = await fetch(url, {
@@ -122,7 +156,8 @@ const saveNote = async () => {
       body: JSON.stringify({ 
         title: newTitle.value, 
         content: newContent.value,
-        category: newCategory.value || 'General'
+        category: newCategory.value || 'General',
+        is_shortcut: is_shortcut
       })
     })
     const json = await res.json()
@@ -133,6 +168,10 @@ const saveNote = async () => {
         triggerToast('Command successfully updated!')
       } else {
         notes.value.push(json.data)
+        // Automatically expand the new category
+        const newSet = new Set(expandedCategories.value)
+        newSet.add(json.data.category)
+        expandedCategories.value = newSet
         triggerToast('Command successfully saved!')
       }
       
@@ -141,6 +180,33 @@ const saveNote = async () => {
     }
   } catch (err) {
     console.error("Error saving note", err)
+  }
+}
+
+const toggleShortcut = async (note) => {
+  const newValue = note.is_shortcut ? 0 : 1;
+  try {
+    const res = await fetch(`/api/notes/${note.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        title: note.title, 
+        content: note.content,
+        category: note.category,
+        is_shortcut: newValue
+      })
+    })
+    const json = await res.json()
+    if (json.data) {
+      const index = notes.value.findIndex(n => n.id === note.id)
+      if (index !== -1) notes.value[index] = json.data
+      if (selectedNote.value && selectedNote.value.id === note.id) {
+        selectedNote.value = json.data
+      }
+      triggerToast(newValue ? 'Added to Dashboard Shortcuts!' : 'Removed from Dashboard.')
+    }
+  } catch (err) {
+    console.error("Error toggling shortcut", err)
   }
 }
 
@@ -163,7 +229,7 @@ const executeDelete = async () => {
     if (res.ok) {
       notes.value = notes.value.filter(n => n.id !== id)
       if (selectedNote.value?.id === id) {
-        selectedNote.value = notes.value.length > 0 ? notes.value[0] : null
+        selectedNote.value = null // Go back to dashboard
       }
       triggerToast('Command successfully deleted!')
     }
@@ -203,14 +269,37 @@ const renderMarkdown = (text) => {
   return DOMPurify.sanitize(marked(text))
 }
 
+const filteredNotes = computed(() => {
+  if (!searchQuery.value) return notes.value
+  const query = searchQuery.value.toLowerCase()
+  return notes.value.filter(note => 
+    note.title.toLowerCase().includes(query) || 
+    note.content.toLowerCase().includes(query) ||
+    (note.category && note.category.toLowerCase().includes(query))
+  )
+})
+
 const notesByCategory = computed(() => {
   const grouped = {}
-  notes.value.forEach(note => {
+  filteredNotes.value.forEach(note => {
     const cat = note.category || 'General'
     if (!grouped[cat]) grouped[cat] = []
     grouped[cat].push(note)
   })
-  return grouped
+  
+  // Sort categories alphabetically
+  const sortedKeys = Object.keys(grouped).sort((a, b) => a.localeCompare(b))
+  
+  const sortedGrouped = {}
+  sortedKeys.forEach(key => {
+    sortedGrouped[key] = grouped[key]
+  })
+  
+  return sortedGrouped
+})
+
+const shortcutNotes = computed(() => {
+  return notes.value.filter(n => n.is_shortcut)
 })
 
 onMounted(() => {
@@ -223,7 +312,7 @@ onMounted(() => {
       },
       (error) => {
         console.warn("Geolocation denied or error, using default Jakarta coordinates", error)
-        fetchWeatherData(-6.2088, 106.8456) // Default Jakarta
+        fetchWeatherData(-6.2088, 106.8456)
       }
     )
   } else {
@@ -244,12 +333,19 @@ onMounted(() => {
             <span class="logo-subtitle">Command Center</span>
           </div>
         </div>
+        
+        <div class="sidebar-search mt-4">
+          <div class="search-container-small">
+            <Search :size="14" class="search-icon" />
+            <input v-model="searchQuery" type="text" placeholder="Search commands..." class="search-input" />
+          </div>
+        </div>
       </div>
       
       <div class="sidebar-content">
         <div class="nav-section">
           <h3 class="nav-heading">Main Menu</h3>
-          <div class="nav-item" :class="{ active: !showAddForm && notes.length > 0 }" @click="showAddForm = false">
+          <div class="nav-item" :class="{ active: !showAddForm && !selectedNote }" @click="showDashboard">
             <LayoutDashboard :size="18" class="nav-icon" />
             <span>Dashboard</span>
           </div>
@@ -260,17 +356,22 @@ onMounted(() => {
         </div>
 
         <div v-for="(catNotes, category) in notesByCategory" :key="category" class="nav-section">
-          <h3 class="nav-heading">{{ category }}</h3>
-          <div class="note-list">
+          <div class="category-header" @click="toggleCategory(category)">
+            <h3 class="nav-heading m-0">{{ category }}</h3>
+            <ChevronDown v-if="expandedCategories.has(category) || searchQuery" :size="14" class="text-muted" />
+            <ChevronRight v-else :size="14" class="text-muted" />
+          </div>
+          
+          <div v-show="expandedCategories.has(category) || searchQuery" class="note-list">
             <div 
               v-for="note in catNotes" 
               :key="note.id" 
               class="nav-item sub-item"
               :class="{ active: selectedNote?.id === note.id && !showAddForm }"
-              @click="selectedNote = note; showAddForm = false"
+              @click="selectNote(note)"
             >
               <FileText :size="16" class="nav-icon muted" />
-              <span class="truncate">{{ note.title }}</span>
+              <span class="truncate" :title="note.title">{{ note.title }}</span>
             </div>
           </div>
         </div>
@@ -345,7 +446,7 @@ onMounted(() => {
                 <textarea v-model="newContent" placeholder="Enter your markdown or command here. Use ``` for code blocks." rows="10" class="input-field textarea-field"></textarea>
               </div>
               <div class="form-actions">
-                <button @click="showAddForm = false" class="btn btn-outline">Cancel</button>
+                <button @click="showDashboard" class="btn btn-outline">Cancel</button>
                 <button @click="saveNote" class="btn btn-primary">{{ editNoteId ? 'Update Command' : 'Save Command' }}</button>
               </div>
             </div>
@@ -353,9 +454,16 @@ onMounted(() => {
 
           <!-- Note Detail View -->
           <div v-else-if="selectedNote" class="view-container">
-            <div class="page-header">
-              <div class="badge">{{ selectedNote.category || 'General' }}</div>
-              <h1>{{ selectedNote.title }}</h1>
+            <div class="page-header note-header-flex">
+              <div>
+                <div class="badge">{{ selectedNote.category || 'General' }}</div>
+                <h1>{{ selectedNote.title }}</h1>
+              </div>
+              <button @click="toggleShortcut(selectedNote)" class="btn btn-outline" :class="{ 'active-shortcut': selectedNote.is_shortcut }" :title="selectedNote.is_shortcut ? 'Unpin from Dashboard' : 'Pin to Dashboard'">
+                <Pin v-if="!selectedNote.is_shortcut" :size="16" />
+                <PinOff v-else :size="16" />
+                {{ selectedNote.is_shortcut ? 'Unpin' : 'Pin' }}
+              </button>
             </div>
             
             <div class="card note-card">
@@ -382,15 +490,35 @@ onMounted(() => {
             </div>
           </div>
 
-          <!-- Empty State -->
-          <div v-else class="empty-state">
-            <Terminal :size="48" class="empty-icon" />
-            <h2>No commands found</h2>
-            <p class="text-muted">Get started by creating a new command snippet.</p>
-            <button @click="openAddForm" class="btn btn-primary mt-4">
-              <Plus :size="16" /> New Command
-            </button>
+          <!-- Dashboard Grid View -->
+          <div v-else class="view-container">
+            <div class="page-header">
+              <h1>Dashboard</h1>
+              <p class="text-muted">Quick access to your pinned commands.</p>
+            </div>
+            
+            <div v-if="shortcutNotes.length > 0" class="dashboard-grid">
+              <div v-for="note in shortcutNotes" :key="note.id" class="card grid-card" @click="selectNote(note)">
+                <div class="grid-card-header">
+                  <div class="badge small-badge">{{ note.category || 'General' }}</div>
+                  <Terminal :size="16" class="text-muted" />
+                </div>
+                <h3 class="grid-card-title truncate-2">{{ note.title }}</h3>
+                <div class="grid-card-footer">
+                  <button @click.stop="copyToClipboard(note.content)" class="btn-icon">
+                    <Copy :size="14" />
+                  </button>
+                </div>
+              </div>
+            </div>
+            
+            <div v-else class="empty-state">
+              <LayoutDashboard :size="48" class="empty-icon" />
+              <h2>No Shortcuts Pinned</h2>
+              <p class="text-muted">Pin your frequently used commands to see them here.</p>
+            </div>
           </div>
+
         </div>
       </div>
     </main>
@@ -481,10 +609,18 @@ body {
 }
 
 .mt-4 { margin-top: 1rem; }
+.m-0 { margin: 0 !important; }
 .truncate {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.truncate-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;  
+  overflow: hidden;
 }
 
 .layout {
@@ -502,7 +638,7 @@ body {
 }
 
 .sidebar-header {
-  padding: 1.5rem 1.25rem;
+  padding: 1.5rem 1.25rem 1rem 1.25rem;
 }
 
 .logo {
@@ -524,6 +660,39 @@ body {
 .logo-subtitle {
   font-size: 0.75rem;
   color: var(--muted-foreground);
+}
+
+.search-container-small {
+  display: flex;
+  align-items: center;
+  background-color: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  width: 100%;
+  transition: border-color 0.15s;
+}
+
+.search-container-small:focus-within {
+  border-color: var(--ring);
+}
+
+.search-container-small .search-icon {
+  color: var(--muted-foreground);
+  margin-right: 0.5rem;
+}
+
+.search-container-small .search-input {
+  background: transparent;
+  border: none;
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  width: 100%;
+  padding: 0.25rem 0;
+}
+
+.search-container-small .search-input:focus {
+  outline: none;
 }
 
 .sidebar-content {
@@ -609,14 +778,26 @@ body {
   margin-bottom: 1.5rem;
 }
 
+.category-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0.75rem;
+  margin-bottom: 0.5rem;
+  cursor: pointer;
+}
+
+.category-header:hover .nav-heading {
+  color: var(--foreground);
+}
+
 .nav-heading {
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--muted-foreground);
-  padding: 0 0.75rem;
-  margin: 0 0 0.5rem 0;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  transition: color 0.15s;
 }
 
 .nav-item {
@@ -678,6 +859,12 @@ body {
   margin-bottom: 2rem;
 }
 
+.note-header-flex {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
 .page-header h1 {
   font-size: 1.875rem;
   font-weight: 700;
@@ -694,6 +881,69 @@ body {
   font-size: 0.75rem;
   font-weight: 500;
   margin-bottom: 0.75rem;
+}
+
+.small-badge {
+  font-size: 0.65rem;
+  padding: 0.15rem 0.4rem;
+  margin-bottom: 0;
+}
+
+/* Dashboard Grid */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+}
+
+.grid-card {
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  height: 140px;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.grid-card:hover {
+  border-color: var(--ring);
+  transform: translateY(-2px);
+}
+
+.grid-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.75rem;
+}
+
+.grid-card-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0;
+  line-height: 1.4;
+  flex: 1;
+}
+
+.grid-card-footer {
+  margin-top: auto;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-icon {
+  background: transparent;
+  border: none;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 0.25rem;
+  transition: all 0.15s;
+}
+
+.btn-icon:hover {
+  background: var(--accent);
+  color: var(--foreground);
 }
 
 /* Cards */
@@ -801,6 +1051,12 @@ body {
 
 .btn-outline:hover {
   background-color: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.active-shortcut {
+  background-color: var(--accent);
+  border-color: var(--ring);
   color: var(--accent-foreground);
 }
 
