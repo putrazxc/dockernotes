@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { Copy, Plus, Terminal, FileText, LayoutDashboard, Check, Edit2, Trash2, AlertTriangle } from 'lucide-vue-next'
+import { Copy, Plus, Terminal, FileText, LayoutDashboard, Check, Edit2, Trash2, AlertTriangle, Cloud, MapPin, Wind, Sun, CloudRain } from 'lucide-vue-next'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
@@ -24,6 +24,12 @@ let toastTimeout = null
 const showDeleteModal = ref(false)
 const noteToDelete = ref(null)
 
+// Weather & AQI State
+const weatherData = ref(null)
+const aqiData = ref(null)
+const locationName = ref('Detecting location...')
+const isWeatherLoading = ref(true)
+
 const fetchNotes = async () => {
   try {
     const res = await fetch('/api/notes')
@@ -39,6 +45,50 @@ const fetchNotes = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const fetchWeatherData = async (lat, lon) => {
+  try {
+    // Reverse Geocoding to get City Name
+    const geoRes = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`)
+    const geoJson = await geoRes.json()
+    locationName.value = geoJson.city || geoJson.locality || 'Unknown Location'
+
+    // Fetch Weather from Open-Meteo
+    const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code`)
+    const weatherJson = await weatherRes.json()
+    weatherData.value = weatherJson.current
+
+    // Fetch Air Quality from Open-Meteo
+    const aqiRes = await fetch(`https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=us_aqi`)
+    const aqiJson = await aqiRes.json()
+    aqiData.value = aqiJson.current
+    
+  } catch (err) {
+    console.error("Error fetching weather/aqi data", err)
+    locationName.value = 'Failed to load'
+  } finally {
+    isWeatherLoading.value = false
+  }
+}
+
+const getAQIStatus = (aqi) => {
+  if (!aqi) return { text: '-', color: '#a1a1aa' }
+  if (aqi <= 50) return { text: 'Good', color: '#10b981' } // Green
+  if (aqi <= 100) return { text: 'Moderate', color: '#f59e0b' } // Yellow
+  if (aqi <= 150) return { text: 'Unhealthy for Sensitive', color: '#f97316' } // Orange
+  if (aqi <= 200) return { text: 'Unhealthy', color: '#ef4444' } // Red
+  if (aqi <= 300) return { text: 'Very Unhealthy', color: '#8b5cf6' } // Purple
+  return { text: 'Hazardous', color: '#7f1d1d' } // Dark Red
+}
+
+const getWeatherIcon = (code) => {
+  // WMO Weather interpretation codes
+  if (code === 0) return Sun // Clear sky
+  if (code === 1 || code === 2 || code === 3) return Cloud // Mainly clear, partly cloudy, and overcast
+  if (code >= 50 && code <= 69) return CloudRain // Drizzle / Rain
+  if (code >= 80 && code <= 82) return CloudRain // Rain showers
+  return Wind // Default/Others
 }
 
 const openAddForm = () => {
@@ -165,6 +215,20 @@ const notesByCategory = computed(() => {
 
 onMounted(() => {
   fetchNotes()
+  
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        fetchWeatherData(position.coords.latitude, position.coords.longitude)
+      },
+      (error) => {
+        console.warn("Geolocation denied or error, using default Jakarta coordinates", error)
+        fetchWeatherData(-6.2088, 106.8456) // Default Jakarta
+      }
+    )
+  } else {
+    fetchWeatherData(-6.2088, 106.8456)
+  }
 })
 </script>
 
@@ -207,6 +271,40 @@ onMounted(() => {
             >
               <FileText :size="16" class="nav-icon muted" />
               <span class="truncate">{{ note.title }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Weather Widget -->
+      <div class="sidebar-footer">
+        <div class="weather-widget">
+          <div class="weather-header">
+            <MapPin :size="14" class="weather-icon muted" />
+            <span class="location-text truncate" :title="locationName">{{ locationName }}</span>
+          </div>
+          
+          <div v-if="isWeatherLoading" class="weather-loading">
+            <div class="spinner small"></div>
+          </div>
+          
+          <div v-else class="weather-body">
+            <div class="weather-item">
+              <component :is="getWeatherIcon(weatherData?.weather_code)" :size="20" class="weather-icon-large" />
+              <div class="weather-details">
+                <span class="weather-value">{{ weatherData?.temperature_2m }}°C</span>
+                <span class="weather-label">Temperature</span>
+              </div>
+            </div>
+            
+            <div class="weather-item">
+              <Wind :size="20" class="weather-icon-large" />
+              <div class="weather-details">
+                <span class="weather-value" :style="{ color: getAQIStatus(aqiData?.us_aqi).color }">
+                  {{ aqiData?.us_aqi || '--' }} AQI
+                </span>
+                <span class="weather-label">{{ getAQIStatus(aqiData?.us_aqi).text }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -432,6 +530,79 @@ body {
   flex: 1;
   overflow-y: auto;
   padding: 0 0.75rem;
+}
+
+.sidebar-footer {
+  padding: 1rem;
+  border-top: 1px solid var(--border);
+  background-color: rgba(255, 255, 255, 0.01);
+}
+
+.weather-widget {
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+}
+
+.weather-header {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.location-text {
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.weather-loading {
+  display: flex;
+  justify-content: center;
+  padding: 1rem 0;
+}
+
+.spinner.small {
+  width: 14px;
+  height: 14px;
+  border-width: 1.5px;
+}
+
+.weather-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.weather-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.weather-icon-large {
+  color: var(--foreground);
+  opacity: 0.8;
+}
+
+.weather-details {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.weather-value {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--foreground);
+}
+
+.weather-label {
+  font-size: 0.7rem;
+  color: var(--muted-foreground);
+  margin-top: 0.15rem;
 }
 
 .nav-section {
